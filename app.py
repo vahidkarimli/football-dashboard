@@ -27,8 +27,24 @@ def get_team_info(team_name):
     return None
 
 def get_last_matches(team_id, count=7):
-    # season=2025 covers the active 2025/2026 club season for any team
-    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&season=2025&last={count}"
+    # Dynamically find the team's active league and season first
+    leagues_url = f"https://v3.football.api-sports.io/leagues?team={team_id}"
+    leagues_res = requests.get(leagues_url, headers=HEADERS).json()
+    
+    if not leagues_res.get("response"):
+        return []
+        
+    # Grab the primary league and its most recent active season
+    item = leagues_res["response"][0]
+    league_id = item["league"]["id"]
+    
+    seasons = [s["year"] for s in item["seasons"] if s.get("current") or s["year"] >= 2024]
+    if not seasons:
+        seasons = [item["seasons"][-1]["year"]]
+    season = max(seasons)
+    
+    # Fetch fixtures using team, league, and correct active season
+    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&league={league_id}&season={season}&last={count}"
     response = requests.get(url, headers=HEADERS).json()
     return response.get("response", [])
 
@@ -55,7 +71,7 @@ def get_injuries(team_id):
     return response.get("response", [])
 
 # --- MAIN APP LOGIC ---
-team_search = st.text_input("Enter Football Club Name (e.g., Arsenal, Real Madrid, Galatasaray, Barcelona):", "Arsenal")
+team_search = st.text_input("Enter Football Club Name (e.g., Arsenal, Real Madrid, Galatasaray, Barcelona):", "Galatasaray")
 
 if st.button("Analyze Club"):
     with st.spinner("Fetching verified match data..."):
@@ -74,7 +90,7 @@ if st.button("Analyze Club"):
         matches = get_last_matches(team_id, count=7)
         
         if not matches:
-            st.warning("No recent match data available for this season.")
+            st.warning("No recent match data available for this team.")
         else:
             match_table = []
             for m in matches:
