@@ -27,25 +27,14 @@ def get_team_info(team_name):
     return None
 
 def get_last_matches(team_id, count=7):
-    # Dynamically find the team's active league and season first
-    leagues_url = f"https://v3.football.api-sports.io/leagues?team={team_id}"
-    leagues_res = requests.get(leagues_url, headers=HEADERS).json()
-    
-    if not leagues_res.get("response"):
-        return []
-        
-    # Grab the primary league and its most recent active season
-    item = leagues_res["response"][0]
-    league_id = item["league"]["id"]
-    
-    seasons = [s["year"] for s in item["seasons"] if s.get("current") or s["year"] >= 2024]
-    if not seasons:
-        seasons = [item["seasons"][-1]["year"]]
-    season = max(seasons)
-    
-    # Fetch fixtures using team, league, and correct active season
-    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&league={league_id}&season={season}&last={count}"
+    # Let's try fetching the last matches using season=2025 (current European club season)
+    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&season=2025&last={count}"
     response = requests.get(url, headers=HEADERS).json()
+    
+    # DEBUG: Let's show the raw response on the app so you can see what API-Football returns!
+    with st.expander("🛠️ API Debug Inspector (Click to expand)"):
+        st.write(response)
+        
     return response.get("response", [])
 
 def get_match_stats(fixture_id):
@@ -90,7 +79,7 @@ if st.button("Analyze Club"):
         matches = get_last_matches(team_id, count=7)
         
         if not matches:
-            st.warning("No recent match data available for this team.")
+            st.warning("No recent match data available for this season. Check the 'API Debug Inspector' dropdown above to see the exact message from API-Football.")
         else:
             match_table = []
             for m in matches:
