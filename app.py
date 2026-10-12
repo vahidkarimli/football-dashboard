@@ -27,8 +27,8 @@ def get_team_info(team_name):
     return None
 
 def get_last_matches(team_id, count=7):
-    # Dynamic endpoint fetching the last 7 matches for ANY team searched
-    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last={count}"
+    # season=2025 covers the active 2025/2026 club season for any team
+    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&season=2025&last={count}"
     response = requests.get(url, headers=HEADERS).json()
     return response.get("response", [])
 
@@ -74,7 +74,7 @@ if st.button("Analyze Club"):
         matches = get_last_matches(team_id, count=7)
         
         if not matches:
-            st.warning("No recent match data available for this team.")
+            st.warning("No recent match data available for this season.")
         else:
             match_table = []
             for m in matches:
