@@ -7,8 +7,8 @@ import requests
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="Universal Live Sports Analytics & Value Betting Engine", layout="wide")
 
-st.title("⚽ Universal Live Sports Analytics & Value Betting Engine")
-st.caption("Poisson Statistical Modeling • Real-Time Odds API Integration • Expected Value (+EV) Scanner")
+st.title("⚽ Universal Live Sports Analytics & Multi-Market Betting Engine")
+st.caption("Poisson Modeling • Real-Time Odds API • BTTS, Goals, Corners & Shots Analysis")
 
 # --- SIDEBAR CONFIGURATION ---
 st.sidebar.header("⚙️ Data & League Settings")
@@ -88,7 +88,7 @@ def fetch_live_odds(api_key, sport_key):
         pass
     return []
 
-# --- STATISTICAL MODEL ENGINE ---
+# --- STATISTICAL MODEL & MARKET ENGINES ---
 def calculate_poisson_probabilities(home_xg, away_xg, max_goals=5):
     home_probs = [poisson.pmf(i, home_xg) for i in range(max_goals + 1)]
     away_probs = [poisson.pmf(i, away_xg) for i in range(max_goals + 1)]
@@ -101,6 +101,42 @@ def calculate_poisson_probabilities(home_xg, away_xg, max_goals=5):
     
     total = home_win + draw + away_win
     return home_win / total, draw / total, away_win / total, score_matrix
+
+def calculate_extended_markets(score_matrix, home_xg, away_xg):
+    """Computes probabilities for BTTS, Over/Under 2.5 Goals, and stats estimations."""
+    max_goals = score_matrix.shape[0] - 1
+    btts_yes = 0.0
+    over_2_5 = 0.0
+    
+    for h in range(max_goals + 1):
+        for a in range(max_goals + 1):
+            prob = score_matrix[h][a]
+            total_goals = h + a
+            
+            if h > 0 and a > 0:
+                btts_yes += prob
+            if total_goals > 2.5:
+                over_2_5 += prob
+
+    btts_no = 1.0 - btts_yes
+    under_2_5 = 1.0 - over_2_5
+    
+    est_home_corners = round(home_xg * 2.8 + 2.1, 1)
+    est_away_corners = round(away_xg * 2.5 + 1.8, 1)
+    total_match_corners = est_home_corners + est_away_corners
+    
+    est_home_sot = round(home_xg * 1.6 + 1.2, 1)
+    est_away_sot = round(away_xg * 1.5 + 1.0, 1)
+    
+    return {
+        "BTTS Yes": round(btts_yes, 3),
+        "BTTS No": round(btts_no, 3),
+        "Over 2.5 Goals": round(over_2_5, 3),
+        "Under 2.5 Goals": round(under_2_5, 3),
+        "Est. Total Corners": round(total_match_corners, 1),
+        "Est. Home SOT": est_home_sot,
+        "Est. Away SOT": est_away_sot
+    }
 
 def calculate_expected_value(model_prob, decimal_odds):
     if decimal_odds <= 1.0:
@@ -119,7 +155,6 @@ def calculate_kelly_stake(model_prob, decimal_odds, bankroll, fractional=0.25):
 raw_standings = fetch_live_standings(collect_api_key, league_info["collect_key"])
 
 if raw_standings:
-    # Process live CollectAPI data into a clean DataFrame
     processed = []
     for item in raw_standings:
         played = int(item.get("play", item.get("played", 20)))
@@ -141,7 +176,6 @@ if raw_standings:
         })
     df_standings = pd.DataFrame(processed).sort_values(by="Rank")
 else:
-    # Fallback Mock Engine if no CollectAPI key is provided
     teams_dict = {
         "Turkish Süper Lig": ["Galatasaray", "Fenerbahçe", "Beşiktaş", "Trabzonspor", "Başakşehir", "Kasımpaşa", "Samsunspor", "Göztepe"],
         "English Premier League": ["Arsenal", "Manchester City", "Liverpool", "Chelsea", "Aston Villa", "Tottenham", "Newcastle", "Brighton"],
@@ -163,15 +197,14 @@ else:
     if not collect_api_key:
         st.sidebar.info("💡 Tip: Enter a CollectAPI key to load live team standings.")
 
-# Fetch live odds data
 live_odds_data = fetch_live_odds(odds_api_key, league_info["odds_key"])
 
 # --- DASHBOARD TABS ---
-tab1, tab2, tab3 = st.tabs(["🔮 Match Predictor Engine", "💰 Live Value Bet (+EV) Scanner", "🏆 League Standings"])
+tab1, tab2, tab3 = st.tabs(["🔮 Match Predictor & Markets", "💰 Live Value Bet Scanner (+EV)", "🏆 League Standings"])
 
-# --- TAB 1: MATCH PREDICTOR ---
+# --- TAB 1: MATCH PREDICTOR & MARKETS ---
 with tab1:
-    st.subheader(f"🔮 Match Predictor — {selected_league_name}")
+    st.subheader(f"🔮 Match Predictor & Multi-Market Analysis — {selected_league_name}")
     
     col1, col2, col3 = st.columns(3)
     teams = df_standings["Team"].tolist()
@@ -192,7 +225,6 @@ with tab1:
         
         home_attack = home_row["Avg Goals Scored"] / league_avg_goals
         away_defense = away_row["Avg Goals Conceded"] / league_avg_goals
-        
         away_attack = away_row["Avg Goals Scored"] / league_avg_goals
         home_defense = home_row["Avg Goals Conceded"] / league_avg_goals
         
@@ -200,6 +232,7 @@ with tab1:
         away_xg = max(0.2, round(away_attack * home_defense * league_avg_goals, 2))
         
         p_home, p_draw, p_away, score_grid = calculate_poisson_probabilities(home_xg, away_xg)
+        extended_markets = calculate_extended_markets(score_grid, home_xg, away_xg)
         
         st.markdown("---")
         mc1, mc2, mc3, mc4 = st.columns(4)
@@ -208,13 +241,8 @@ with tab1:
         mc3.metric("Predicted Winner", home_team if p_home > p_away else (away_team if p_away > p_home else "Draw"))
         mc4.metric("Model Confidence", f"{max(p_home, p_away) * 100:.1f}%")
 
-        st.write("#### 📊 Outcome Probabilities")
-        pb1, pb2, pb3 = st.columns(3)
-        pb1.metric(f"🏠 {home_team} Win", f"{p_home * 100:.1f}%")
-        pb2.metric("🤝 Draw", f"{p_draw * 100:.1f}%")
-        pb3.metric(f"✈️ {away_team} Win", f"{p_away * 100:.1f}%")
-
-        # Check if live odds exist for this specific match
+        # 1X2 Market & Odds Analysis
+        st.write("#### 📊 Match Winner (1X2) & Value Analysis")
         default_home_odds, default_draw_odds, default_away_odds = 2.10, 3.40, 3.20
         match_live_found = False
         
@@ -225,28 +253,17 @@ with tab1:
                 if home_team.lower() in h_name.lower() or away_team.lower() in a_name.lower():
                     bookmakers = game.get("bookmakers", [])
                     if bookmakers:
-                        markets = bookmakers[0].get("markets", [])
-                        for m in markets:
+                        for m in bookmakers[0].get("markets", []):
                             if m.get("key") == "h2h":
-                                outcomes = m.get("outcomes", [])
-                                for o in outcomes:
-                                    name = o.get("name")
-                                    price = o.get("price")
+                                for o in m.get("outcomes", []):
+                                    name, price = o.get("name"), o.get("price")
                                     if home_team.lower() in name.lower():
-                                        default_home_odds = price
-                                        match_live_found = True
+                                        default_home_odds, match_live_found = price, True
                                     elif away_team.lower() in name.lower():
-                                        default_away_odds = price
-                                        match_live_found = True
+                                        default_away_odds, match_live_found = price, True
                                     elif "draw" in name.lower():
                                         default_draw_odds = price
 
-        if match_live_found:
-            st.success("🟢 Live Bookmaker Odds successfully loaded from The Odds API!")
-        else:
-            st.info("ℹ️ Using standard odds inputs (Enter your Odds API key in sidebar for automated live lines).")
-
-        st.write("#### 💡 Odds & Expected Value (+EV) Analyzer")
         oc1, oc2, oc3 = st.columns(3)
         odds_home = oc1.number_input(f"{home_team} Odds:", min_value=1.01, value=float(default_home_odds), step=0.05)
         odds_draw = oc2.number_input("Draw Odds:", min_value=1.01, value=float(default_draw_odds), step=0.05)
@@ -261,55 +278,13 @@ with tab1:
         stake_away = calculate_kelly_stake(p_away, odds_away, bankroll)
         
         analysis_data = [
-            {"Outcome": f"{home_team} Win", "Model Prob": f"{p_home*100:.1f}%", "Bookie Odds": odds_home, "Implied Prob": f"{(1/odds_home)*100:.1f}%", "Expected Value (EV)": f"{ev_home*100:+.1f}%", "Kelly Stake": f"${stake_home:.2f}" if ev_home > 0 else "$0.00", "Status": "🔥 VALUE BET" if ev_home > 0.05 else ("✅ Fair" if ev_home > 0 else "❌ No Value")},
-            {"Outcome": "Draw", "Model Prob": f"{p_draw*100:.1f}%", "Bookie Odds": odds_draw, "Implied Prob": f"{(1/odds_draw)*100:.1f}%", "Expected Value (EV)": f"{ev_draw*100:+.1f}%", "Kelly Stake": f"${stake_draw:.2f}" if ev_draw > 0 else "$0.00", "Status": "🔥 VALUE BET" if ev_draw > 0.05 else ("✅ Fair" if ev_draw > 0 else "❌ No Value")},
-            {"Outcome": f"{away_team} Win", "Model Prob": f"{p_away*100:.1f}%", "Bookie Odds": odds_away, "Implied Prob": f"{(1/odds_away)*100:.1f}%", "Expected Value (EV)": f"{ev_away*100:+.1f}%", "Kelly Stake": f"${stake_away:.2f}" if ev_away > 0 else "$0.00", "Status": "🔥 VALUE BET" if ev_away > 0.05 else ("✅ Fair" if ev_away > 0 else "❌ No Value")},
+            {"Outcome": f"{home_team} Win", "Model Prob": f"{p_home*100:.1f}%", "Odds": odds_home, "EV": f"{ev_home*100:+.1f}%", "Kelly Stake": f"${stake_home:.2f}" if ev_home > 0 else "$0.00", "Status": "🔥 VALUE" if ev_home > 0.05 else ("✅ Fair" if ev_home > 0 else "❌ None")},
+            {"Outcome": "Draw", "Model Prob": f"{p_draw*100:.1f}%", "Odds": odds_draw, "EV": f"{ev_draw*100:+.1f}%", "Kelly Stake": f"${stake_draw:.2f}" if ev_draw > 0 else "$0.00", "Status": "🔥 VALUE" if ev_draw > 0.05 else ("✅ Fair" if ev_draw > 0 else "❌ None")},
+            {"Outcome": f"{away_team} Win", "Model Prob": f"{p_away*100:.1f}%", "Odds": odds_away, "EV": f"{ev_away*100:+.1f}%", "Kelly Stake": f"${stake_away:.2f}" if ev_away > 0 else "$0.00", "Status": "🔥 VALUE" if ev_away > 0.05 else ("✅ Fair" if ev_away > 0 else "❌ None")},
         ]
         st.dataframe(pd.DataFrame(analysis_data), hide_index=True, use_container_width=True)
 
-        st.write("#### 🎯 Scoreline Probability Matrix")
-        scores_list = []
-        for h in range(6):
-            for a in range(6):
-                prob = score_grid[h][a]
-                scores_list.append({"Scoreline": f"{h} - {a}", "Probability": prob, "Percentage": f"{prob*100:.2f}%"})
-        df_scores = pd.DataFrame(scores_list).sort_values(by="Probability", ascending=False).head(8)
-        st.dataframe(df_scores[["Scoreline", "Percentage"]], hide_index=True, use_container_width=True)
-
-# --- TAB 2: LIVE VALUE BET SCANNER ---
-with tab2:
-    st.subheader(f"💰 Live Value Bet Scanner (+EV) — {selected_league_name}")
-    
-    if live_odds_data:
-        st.success(f"Scanning {len(live_odds_data)} live fixtures fetched from The Odds API...")
-        scanned_fixtures = []
-        
-        for game in live_odds_data:
-            h_team = game.get("home_team")
-            a_team = game.get("away_team")
-            bookmakers = game.get("bookmakers", [])
-            
-            if not bookmakers:
-                continue
-            
-            # Extract odds from first available bookmaker
-            markets = bookmakers[0].get("markets", [])
-            h_odds, d_odds, a_odds = 2.0, 3.3, 3.0
-            for m in markets:
-                if m.get("key") == "h2h":
-                    for o in m.get("outcomes", []):
-                        name = o.get("name")
-                        price = o.get("price")
-                        if name == h_team:
-                            h_odds = price
-                        elif name == a_team:
-                            a_odds = price
-                        elif "draw" in name.lower():
-                            d_odds = price
-            
-            # Simple model approximation based on table standings if team names match
-            h_match = df_standings[df_standings["Team"].str.contains(h_team[:4], case=False, na=False)]
-            a_match = df_standings[df_standings["Team"].str.contains(a_team[:4], case=False, na=False)]
-            
-            if not h_match.empty and not a_match.empty:
-                h_xg = h_match.iloc[0]["Avg Goals Scored"] * 1.
+        # Multi-Market Predictions (BTTS, Over/Under, Corners, Shots)
+        st.write("#### 🎯 Additional Markets (BTTS, Goals, Corners & Shots on Target)")
+        markets_data = [
+            {"Market": "Both Teams to Score (BTTS)", "Selection": "Yes", "Probability": f"{extended_markets['BTTS Yes']*100:.1f}%", "Recommendation": "🔥 Recommended" if extended_markets['BTTS Yes'] >
