@@ -27,17 +27,15 @@ def get_super_lig_standings():
         response = requests.get(url, headers=HEADERS)
         data = response.json()
         
-        # Display raw API output for debugging if needed
-        with st.expander("🛠️ API Debug Inspector (Click to view raw API response)"):
-            st.write("Status Code:", response.status_code)
-            st.write("Response Data:", data)
-
-        if isinstance(data, dict) and data.get("success"):
+        # CollectAPI can return either a list directly OR a dictionary with a "result" key
+        if isinstance(data, list):
+            return data
+        elif isinstance(data, dict) and data.get("success"):
             return data.get("result", [])
         elif isinstance(data, dict) and "message" in data:
             st.error(f"CollectAPI Message: {data['message']}")
         else:
-            st.error("Received invalid response format from CollectAPI.")
+            st.error("Received unexpected response format from CollectAPI.")
     except Exception as e:
         st.error(f"Request failed: {str(e)}")
     return []
@@ -48,7 +46,9 @@ def get_super_lig_results():
         response = requests.get(url, headers=HEADERS)
         data = response.json()
         
-        if isinstance(data, dict) and data.get("success"):
+        if isinstance(data, list):
+            return data
+        elif isinstance(data, dict) and data.get("success"):
             return data.get("result", [])
         elif isinstance(data, dict) and "message" in data:
             st.error(f"CollectAPI Message: {data['message']}")
@@ -62,11 +62,20 @@ tab1, tab2 = st.tabs(["🏆 League Standings", "⚽ Recent Results"])
 with tab1:
     st.subheader("Current Süper Lig Standings")
     if st.button("Load Standings"):
-        with st.spinner("Fetching standings..."):
+        with st.spinner("Fetching live standings..."):
             standings = get_super_lig_standings()
             if standings:
-                df_standings = pd.DataFrame(standings)
-                st.dataframe(df_standings, use_container_width=True)
+                df = pd.DataFrame(standings)
+                
+                # Format dataframe columns neatly if expected fields exist
+                cols_to_display = ["rank", "team", "play", "win", "draw", "lose", "goalfor", "goalagainst", "goaldistance", "point"]
+                available_cols = [c for c in cols_to_display if c in df.columns]
+                
+                if available_cols:
+                    df = df[available_cols]
+                    df.columns = [c.capitalize() for c in df.columns]
+                
+                st.dataframe(df, use_container_width=True)
 
 with tab2:
     st.subheader("Recent Match Results")
