@@ -269,22 +269,4 @@ with tab1:
         odds_draw = oc2.number_input("Draw Odds:", min_value=1.01, value=float(default_draw_odds), step=0.05)
         odds_away = oc3.number_input(f"{away_team} Odds:", min_value=1.01, value=float(default_away_odds), step=0.05)
         
-        ev_home = calculate_expected_value(p_home, odds_home)
-        ev_draw = calculate_expected_value(p_draw, odds_draw)
-        ev_away = calculate_expected_value(p_away, odds_away)
-        
-        stake_home = calculate_kelly_stake(p_home, odds_home, bankroll)
-        stake_draw = calculate_kelly_stake(p_draw, odds_draw, bankroll)
-        stake_away = calculate_kelly_stake(p_away, odds_away, bankroll)
-        
-        analysis_data = [
-            {"Outcome": f"{home_team} Win", "Model Prob": f"{p_home*100:.1f}%", "Odds": odds_home, "EV": f"{ev_home*100:+.1f}%", "Kelly Stake": f"${stake_home:.2f}" if ev_home > 0 else "$0.00", "Status": "🔥 VALUE" if ev_home > 0.05 else ("✅ Fair" if ev_home > 0 else "❌ None")},
-            {"Outcome": "Draw", "Model Prob": f"{p_draw*100:.1f}%", "Odds": odds_draw, "EV": f"{ev_draw*100:+.1f}%", "Kelly Stake": f"${stake_draw:.2f}" if ev_draw > 0 else "$0.00", "Status": "🔥 VALUE" if ev_draw > 0.05 else ("✅ Fair" if ev_draw > 0 else "❌ None")},
-            {"Outcome": f"{away_team} Win", "Model Prob": f"{p_away*100:.1f}%", "Odds": odds_away, "EV": f"{ev_away*100:+.1f}%", "Kelly Stake": f"${stake_away:.2f}" if ev_away > 0 else "$0.00", "Status": "🔥 VALUE" if ev_away > 0.05 else ("✅ Fair" if ev_away > 0 else "❌ None")},
-        ]
-        st.dataframe(pd.DataFrame(analysis_data), hide_index=True, use_container_width=True)
-
-        # Multi-Market Predictions (BTTS, Over/Under, Corners, Shots)
-        st.write("#### 🎯 Additional Markets (BTTS, Goals, Corners & Shots on Target)")
-        markets_data = [
-            {"Market": "Both Teams to Score (BTTS)", "Selection": "Yes", "Probability": f"{extended_markets['BTTS Yes']*100:.1f}%", "Recommendation": "🔥 Recommended" if extended_markets['BTTS Yes'] >
+        ev_home = calculate_expected_value(
