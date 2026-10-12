@@ -27,7 +27,7 @@ def get_team_info(team_name):
     return None
 
 def get_last_matches(team_id, count=7):
-    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last={count}"
+    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&season=2026&last={count}"
     response = requests.get(url, headers=HEADERS).json()
     return response.get("response", [])
 
