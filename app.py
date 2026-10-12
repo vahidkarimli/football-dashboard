@@ -27,7 +27,8 @@ def get_team_info(team_name):
     return None
 
 def get_last_matches(team_id, count=7):
-    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&season=2026&last={count}"
+    # Dynamic endpoint fetching the last 7 matches for ANY team searched
+    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last={count}"
     response = requests.get(url, headers=HEADERS).json()
     return response.get("response", [])
 
@@ -54,7 +55,7 @@ def get_injuries(team_id):
     return response.get("response", [])
 
 # --- MAIN APP LOGIC ---
-team_search = st.text_input("Enter Football Club Name (e.g., Galatasaray, Arsenal, Real Madrid):", "Galatasaray")
+team_search = st.text_input("Enter Football Club Name (e.g., Arsenal, Real Madrid, Galatasaray, Barcelona):", "Arsenal")
 
 if st.button("Analyze Club"):
     with st.spinner("Fetching verified match data..."):
@@ -72,40 +73,43 @@ if st.button("Analyze Club"):
         st.subheader("📋 Last 7 Matches (Verified Official Stats)")
         matches = get_last_matches(team_id, count=7)
         
-        match_table = []
-        for m in matches:
-            fixture_id = m["fixture"]["id"]
-            date = m["fixture"]["date"][:10]
-            home_club = m["teams"]["home"]["name"]
-            away_club = m["teams"]["away"]["name"]
-            
-            home_goals = m["goals"]["home"]
-            away_goals = m["goals"]["away"]
-            score = f"{home_goals}–{away_goals}"
-            
-            # Determine Result relative to searched team
-            if (m["teams"]["home"]["id"] == team_id and home_goals > away_goals) or \
-               (m["teams"]["away"]["id"] == team_id and away_goals > home_goals):
-                res = "🟢 W"
-            elif home_goals == away_goals:
-                res = "🟡 D"
-            else:
-                res = "🔴 L"
+        if not matches:
+            st.warning("No recent match data available for this team.")
+        else:
+            match_table = []
+            for m in matches:
+                fixture_id = m["fixture"]["id"]
+                date = m["fixture"]["date"][:10]
+                home_club = m["teams"]["home"]["name"]
+                away_club = m["teams"]["away"]["name"]
                 
-            # Get SoT and Corners
-            stats = get_match_stats(fixture_id)
-            
-            match_table.append({
-                "Date": date,
-                "Matchup": f"{home_club} – {away_club}",
-                "Res": res,
-                "Score": score,
-                "Shots on Target": f"{stats['Home SoT']} – {stats['Away SoT']}",
-                "Corners": f"{stats['Home Corners']} – {stats['Away Corners']}"
-            })
-            
-        df = pd.DataFrame(match_table)
-        st.dataframe(df, use_container_width=True)
+                home_goals = m["goals"]["home"] if m["goals"]["home"] is not None else 0
+                away_goals = m["goals"]["away"] if m["goals"]["away"] is not None else 0
+                score = f"{home_goals}–{away_goals}"
+                
+                # Determine Result relative to searched team
+                if (m["teams"]["home"]["id"] == team_id and home_goals > away_goals) or \
+                   (m["teams"]["away"]["id"] == team_id and away_goals > home_goals):
+                    res = "🟢 W"
+                elif home_goals == away_goals:
+                    res = "🟡 D"
+                else:
+                    res = "🔴 L"
+                    
+                # Get SoT and Corners
+                stats = get_match_stats(fixture_id)
+                
+                match_table.append({
+                    "Date": date,
+                    "Matchup": f"{home_club} – {away_club}",
+                    "Res": res,
+                    "Score": score,
+                    "Shots on Target": f"{stats['Home SoT']} – {stats['Away SoT']}",
+                    "Corners": f"{stats['Home Corners']} – {stats['Away Corners']}"
+                })
+                
+            df = pd.DataFrame(match_table)
+            st.dataframe(df, use_container_width=True)
         
         # --- 2. SQUAD INJURIES & MISSING PLAYERS ---
         st.subheader("🏥 Current Missing & Injured Players")
