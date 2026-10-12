@@ -6,7 +6,7 @@ import pandas as pd
 st.set_page_config(page_title="Football Analysis Dashboard", layout="wide")
 st.title("📊 Football Match & Squad Analysis Tool (Live Season)")
 
-# Input for User API Token in Sidebar
+# Input for User API Key in Sidebar
 API_KEY = st.sidebar.text_input("Enter your Football-Data.org API Token:", type="password")
 
 if not API_KEY:
@@ -19,58 +19,71 @@ HEADERS = {
     "X-Auth-Token": API_KEY
 }
 
-# Popular Team ID mapping for instant, reliable lookups on the free tier
-POPULAR_TEAMS = {
-    "Arsenal FC": 57,
-    "Manchester City FC": 65,
-    "Real Madrid CF": 86,
-    "FC Barcelona": 81,
-    "Manchester United FC": 66,
-    "Chelsea FC": 61,
-    "Liverpool FC": 64,
-    "Bayern Munich": 5,
-    "Juventus FC": 109,
-    "AC Milan": 98,
-    "Inter Milan": 108,
-    "Paris Saint-Germain FC": 524
+# Free tier available competitions on football-data.org
+LEAGUES = {
+    "English Premier League (PL)": "PL",
+    "Spanish La Liga (PD)": "PD",
+    "Italian Serie A (SA)": "SA",
+    "German Bundesliga (BL1)": "BL1",
+    "French Ligue 1 (FL1)": "FL1",
+    "UEFA Champions League (CL)": "CL"
 }
 
 # --- HELPER FUNCTIONS ---
-def get_team_matches(team_id, count=7):
-    url = f"https://api.football-data.org/v4/teams/{team_id}/matches?limit={count}"
+@st.cache_data(ttl=3600)
+def get_teams_for_competition(league_code, token):
+    url = f"https://api.football-data.org/v4/competitions/{league_code}/teams"
+    response = requests.get(url, headers={"X-Auth-Token": token})
+    if response.status_code == 200:
+        teams_data = response.json().get("teams", [])
+        return {team["name"]: team["id"] for team in teams_data}
+    return {}
+
+def get_team_matches(team_id):
+    # Fetching matches for the team
+    url = f"https://api.football-data.org/v4/teams/{team_id}/matches?limit=15"
     response = requests.get(url, headers=HEADERS)
     
     if response.status_code != 200:
-        st.error(f"API Error ({response.status_code}): Please check your API token.")
         return []
         
     data = response.json()
     return data.get("matches", [])
 
 # --- MAIN APP LOGIC ---
-selected_team_name = st.selectbox("Select Club:", list(POPULAR_TEAMS.keys()))
-team_id = POPULAR_TEAMS[selected_team_name]
+selected_league_name = st.sidebar.selectbox("Select Competition:", list(LEAGUES.keys()))
+league_code = LEAGUES[selected_league_name]
+
+# Dynamically load teams for the chosen league
+teams_dict = get_teams_for_competition(league_code, API_KEY)
+
+if not teams_dict:
+    st.error("Could not load teams. Please check your API token or try another competition.")
+    st.stop()
+
+selected_team_name = st.selectbox("Select Club:", sorted(list(teams_dict.keys())))
+team_id = teams_dict[selected_team_name]
 
 if st.button("Analyze Club Matches"):
     with st.spinner("Fetching current season match data..."):
-        matches = get_team_matches(team_id, count=7)
+        matches = get_team_matches(team_id)
         
         if not matches:
-            st.warning("No recent match data available for this team.")
+            st.warning("No match data available for this team.")
         else:
             match_table = []
             for m in matches:
                 date = m["utcDate"][:10]
                 home_club = m["homeTeam"]["name"]
                 away_club = m["awayTeam"]["name"]
+                status = m.get("status", "SCHEDULED")
                 
                 score_obj = m.get("score", {}).get("fullTime", {})
                 home_goals = score_obj.get("home")
                 away_goals = score_obj.get("away")
                 
-                if home_goals is not None and away_goals is not None:
+                if status == "FINISHED" and home_goals is not None and away_goals is not None:
                     score = f"{home_goals}–{away_goals}"
-                    # Determine Result relative to selected team
                     is_home = (m["homeTeam"]["id"] == team_id)
                     team_goals = home_goals if is_home else away_goals
                     opp_goals = away_goals if is_home else home_goals
@@ -88,11 +101,11 @@ if st.button("Analyze Club Matches"):
                 match_table.append({
                     "Date": date,
                     "Matchup": f"{home_club} vs {away_club}",
-                    "Status": m.get("status", "SCHEDULED"),
+                    "Status": status,
                     "Result": res,
                     "Score": score
                 })
                 
             df = pd.DataFrame(match_table)
-            st.subheader(f"📋 Recent & Upcoming Matches for {selected_team_name}")
+            st.subheader(f"📋 Matches for {selected_team_name}")
             st.dataframe(df, use_container_width=True)
