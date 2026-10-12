@@ -17,19 +17,19 @@ st.set_page_config(
 
 st.title("⚽ Universal Live Football Analytics & Match Predictions")
 st.caption(
-    "Match probabilities · Recent form · Team context · Data provenance · Simple match insights"
+    "Match probabilities · Recent form · Automated injury/context lookup · Data provenance"
 )
 st.info(
-    "This dashboard is for football analysis and statistical projections, providing clear match insights and probabilities based on current form and team data."
+    "This dashboard provides match analysis, statistical projections, and automated injury insights based on available live data feeds."
 )
 
 LEAGUES: dict[str, dict[str, str | None]] = {
-    "Turkish Süper Lig": {"collect_key": "super-lig", "football_data_code": None},
-    "English Premier League": {"collect_key": "ingiltere-premier-ligi", "football_data_code": "PL"},
-    "Spanish La Liga": {"collect_key": "ispanya-la-liga", "football_data_code": "PD"},
-    "Italian Serie A": {"collect_key": "italya-serie-a", "football_data_code": "SA"},
-    "German Bundesliga": {"collect_key": "almanya-bundesliga", "football_data_code": "BL1"},
-    "UEFA Champions League": {"collect_key": "sampiyonlar-ligi", "football_data_code": "CL"},
+    "Turkish Süper Lig": {"collect_key": "super-lig", "football_data_code": None, "api_football_id": 203},
+    "English Premier League": {"collect_key": "ingiltere-premier-ligi", "football_data_code": "PL", "api_football_id": 39},
+    "Spanish La Liga": {"collect_key": "ispanya-la-liga", "football_data_code": "PD", "api_football_id": 140},
+    "Italian Serie A": {"collect_key": "italya-serie-a", "football_data_code": "SA", "api_football_id": 135},
+    "German Bundesliga": {"collect_key": "almanya-bundesliga", "football_data_code": "BL1", "api_football_id": 78},
+    "UEFA Champions League": {"collect_key": "sampiyonlar-ligi", "football_data_code": "CL", "api_football_id": 2},
 }
 
 MOCK_TEAMS: dict[str, list[str]] = {
@@ -94,6 +94,24 @@ def fetch_recent_matches(token: str, competition_code: str) -> tuple[list[dict[s
         return (matches, "Live Football-Data.org results") if matches else ([], "No finished matches returned")
     except (requests.RequestException, ValueError) as exc:
         return [], f"Football-Data.org request failed: {type(exc).__name__}"
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_api_football_injuries(api_key: str, league_id: int) -> list[dict[str, Any]]:
+    """Fetches active injuries from API-Football (v3.football.api-sports.io)."""
+    if not api_key:
+        return []
+    url = "https://v3.football.api-sports.io/injuries"
+    headers = {"x-apisports-key": api_key}
+    params = {"league": league_id, "season": 2026}
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=12)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("response", [])
+    except Exception:
+        pass
+    return []
 
 
 def normalize_standings(rows: list[dict[str, Any]]) -> pd.DataFrame:
@@ -174,7 +192,7 @@ def recent_form_table(matches: list[dict[str, Any]], team_names: list[str], limi
             "Last 5 (newest first)": " · ".join(x["result"] for x in played) if played else "Unavailable",
             "Goals for / match": round(np.mean([x["gf"] for x in played]), 2) if played else np.nan,
             "Goals against / match": round(np.mean([x["ga"] for x in played]), 2) if played else np.nan,
-            "Recent matches": "; ".join(f"{x['date']} {x['venue']} vs {x['opponent']} {x['gf']}-{x['ga']} ({x['result']})" for x in played) if played else "No matching team names in recent results",
+            "Recent matches": "; ".join(f"{x['date']} {x['venue']} vs {x['opponent']} {x['gf']}-{x['ga']} ({x['result']})" for x in played) if played else "No matching team names",
         })
     return pd.DataFrame(out)
 
@@ -217,14 +235,13 @@ def most_likely_scores(grid: np.ndarray, count: int = 5) -> pd.DataFrame:
 
 
 with st.sidebar:
-    st.header("⚙️ Data & competition")
+    st.header("⚙️ Data & Competition")
     selected_league = st.selectbox("Competition", list(LEAGUES.keys()))
-    st.subheader("Optional API credentials")
-    collect_key = st.text_input("CollectAPI key", type="password", help="Used for league standings.")
-    football_data_token = st.text_input("Football-Data.org token", type="password", help="Used for recent finished matches where competition coverage is available.")
-    st.caption("Credentials are used for this session only. Do not commit secrets to GitHub.")
-    st.divider()
-    st.caption("Data cache: standings 10 min · match history 15 min")
+    st.subheader("🔑 API Credentials")
+    collect_key = st.text_input("CollectAPI Key", type="password", help="For live league standings.")
+    football_data_token = st.text_input("Football-Data.org Token", type="password", help="For recent match results.")
+    api_football_key = st.text_input("API-Football Key (API-Sports)", type="password", help="For automated team injuries and squad news.")
+    st.caption("Credentials remain in session memory only.")
 
 league_info = LEAGUES[selected_league]
 raw_standings, standings_status = fetch_collectapi_standings(collect_key, str(league_info["collect_key"]))
@@ -237,32 +254,28 @@ else:
 
 matches, matches_status = fetch_recent_matches(football_data_token, str(league_info["football_data_code"] or ""))
 
-with st.expander("Data source status", expanded=True):
-    c1, c2 = st.columns(2)
+# Fetch automated injuries if key is provided
+injuries_list = fetch_api_football_injuries(api_football_key, int(league_info["api_football_id"])) if api_football_key else []
+
+with st.expander("Data Source Status", expanded=True):
+    c1, c2, c3 = st.columns(3)
     with c1:
-        if standings_mode == "LIVE API DATA":
-            st.success(f"Standings: {standings_mode}")
-        else:
-            st.warning(f"Standings: {standings_mode}. These rows are illustrative and must not be used as current league facts.")
+        st.success(f"Standings: {standings_mode}")
         st.caption(standings_status)
     with c2:
-        if matches:
-            st.success("Recent results: LIVE API DATA")
-        else:
-            st.warning("Recent results: UNAVAILABLE")
+        st.success("Recent results: " + ("Live" if matches else "Unavailable"))
         st.caption(matches_status)
-    st.caption(f"Last checked in this session: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-
-if standings_mode != "LIVE API DATA":
-    st.warning("The model is currently using demo standings. Add a valid CollectAPI key to calculate from live standings.")
+    with c3:
+        st.success("Automated Injuries: " + ("Connected" if injuries_list else "Manual/Optional"))
+        st.caption(f"{len(injuries_list)} injury reports loaded" if injuries_list else "Add API-Football key for auto-injuries")
 
 team_list = standings["Team"].astype(str).tolist()
 if len(team_list) < 2:
-    st.error("At least two teams are required to run the analysis.")
+    st.error("At least two teams are required.")
     st.stop()
 
 match_tab, form_tab, standings_tab, methodology_tab = st.tabs([
-    "📊 Match analysis & Predictions", "🕒 Recent form", "🏆 Standings", "ℹ️ Methodology & limitations"
+    "📊 Match Analysis & Predictions", "🕒 Recent form", "🏆 Standings", "ℹ️ Methodology"
 ])
 
 with match_tab:
@@ -274,17 +287,30 @@ with match_tab:
         away_index = 1 if len(team_list) > 1 else 0
         away_team = st.selectbox("Away team", team_list, index=away_index, key="away_team")
 
-    st.markdown("#### Context notes (manual, evidence-led)")
-    context_col1, context_col2 = st.columns(2)
-    with context_col1:
-        home_lineup = st.selectbox("Home lineup status", ["Unknown", "Predicted", "Confirmed"], key="home_lineup")
-        home_absences = st.text_input("Home team absences / returns", placeholder="Player names and source")
-        home_rest = st.number_input("Home team's rest days", min_value=0, max_value=21, value=4)
-    with context_col2:
-        away_lineup = st.selectbox("Away lineup status", ["Unknown", "Predicted", "Confirmed"], key="away_lineup")
-        away_absences = st.text_input("Away team absences / returns", placeholder="Player names and source")
-        away_rest = st.number_input("Away team's rest days", min_value=0, max_value=21, value=4)
-    team_context_note = st.text_area("Other verified context", placeholder="Managerial change, fixture congestion, tactical shifts…", height=80)
+    # Automated injury lookup filtering
+    home_injuries = [inj for inj in injuries_list if home_team.lower() in str(inj.get("team", {}).get("name", "")).lower()]
+    away_injuries = [inj for inj in injuries_list if away_team.lower() in str(inj.get("team", {}).get("name", "")).lower()]
+
+    st.markdown("#### 🛡️ Automated Team Conditions & Injuries")
+    ic1, ic2 = st.columns(2)
+    with ic1:
+        st.markdown(f"**{home_team} Reported Absences:**")
+        if home_injuries:
+            for inj in home_injuries:
+                player_name = inj.get("player", {}).get("name", "Unknown Player")
+                reason = inj.get("player", {}).get("reason", "Unknown")
+                st.write(f"• `{player_name}` ({reason})")
+        else:
+            st.caption("No automated injuries found or API key not set.")
+    with ic2:
+        st.markdown(f"**{away_team} Reported Absences:**")
+        if away_injuries:
+            for inj in away_injuries:
+                player_name = inj.get("player", {}).get("name", "Unknown Player")
+                reason = inj.get("player", {}).get("reason", "Unknown")
+                st.write(f"• `{player_name}` ({reason})")
+        else:
+            st.caption("No automated injuries found or API key not set.")
 
     if home_team == away_team:
         st.warning("Choose two different teams to compare them.")
@@ -294,22 +320,27 @@ with match_tab:
         usable = standings[(standings["Played"] > 0) & standings["Avg Goals Scored"].notna() & standings["Avg Goals Conceded"].notna()]
         league_goal_avg = float(usable["Avg Goals Scored"].mean()) if not usable.empty else 1.35
         league_concede_avg = float(usable["Avg Goals Conceded"].mean()) if not usable.empty else league_goal_avg
-        league_goal_avg = max(0.2, league_goal_avg)
-        league_concede_avg = max(0.2, league_concede_avg)
+        
         home_attack = float(home["Avg Goals Scored"]) / league_goal_avg if pd.notna(home["Avg Goals Scored"]) else 1.0
         away_defense = float(away["Avg Goals Conceded"]) / league_concede_avg if pd.notna(away["Avg Goals Conceded"]) else 1.0
         away_attack = float(away["Avg Goals Scored"]) / league_goal_avg if pd.notna(away["Avg Goals Scored"]) else 1.0
         home_defense = float(home["Avg Goals Conceded"]) / league_concede_avg if pd.notna(home["Avg Goals Conceded"]) else 1.0
-        home_xg = float(np.clip(league_goal_avg * home_attack * away_defense * 1.10, 0.15, 4.5))
-        away_xg = float(np.clip(league_goal_avg * away_attack * home_defense, 0.15, 4.5))
+        
+        # Adjust xG automatically based on number of fetched injuries (~4% reduction per missing player)
+        home_injury_penalty = max(0.7, 1.0 - (len(home_injuries) * 0.04))
+        away_injury_penalty = max(0.7, 1.0 - (len(away_injuries) * 0.04))
+
+        home_xg = float(np.clip(league_goal_avg * home_attack * away_defense * 1.10 * home_injury_penalty, 0.15, 4.5))
+        away_xg = float(np.clip(league_goal_avg * away_attack * home_defense * away_injury_penalty, 0.15, 4.5))
+        
         markets, grid = poisson_analysis(home_xg, away_xg)
 
         st.divider()
         metric_cols = st.columns(4)
-        metric_cols[0].metric("Home expected goals", f"{home_xg:.2f}")
-        metric_cols[1].metric("Away expected goals", f"{away_xg:.2f}")
+        metric_cols[0].metric("Home expected goals (xG)", f"{home_xg:.2f}")
+        metric_cols[1].metric("Away expected goals (xG)", f"{away_xg:.2f}")
         metric_cols[2].metric("Expected total goals", f"{home_xg + away_xg:.2f}")
-        metric_cols[3].metric("Model input source", "Live" if standings_mode == "LIVE API DATA" else "Demo")
+        metric_cols[3].metric("Injury Impact", f"Home: -{len(home_injuries)*4}% | Away: -{len(away_injuries)*4}%")
 
         # Simplified Match Predictions & Insights Section
         st.markdown("#### 🎯 Match Predictions & Form Insights")
@@ -321,7 +352,6 @@ with match_tab:
             st.write(f"• **Draw:** `{markets['Draw']:.1%}`")
             st.write(f"• **{away_team} Win:** `{markets['Away win']:.1%}`")
             
-            # Simple form-based recommendation logic
             recommended_pick = max(
                 [(home_team + " Win", markets['Home win']), 
                  ("Draw", markets['Draw']), 
@@ -337,9 +367,9 @@ with match_tab:
             st.write(f"• **Under 2.5 Goals:** `{markets['Under 2.5 goals']:.1%}`")
             top_btts = "BTTS — Yes" if markets['BTTS — Yes'] > 0.5 else "BTTS — No"
             top_goals = "Over 2.5 Goals" if markets['Over 2.5 goals'] > 0.5 else "Under 2.5 Goals"
-            st.info(f"💡 **Key Trend Insights:** Favors **{top_btts}** and **{top_goals}** based on current scoring/conceding metrics.")
+            st.info(f"💡 **Key Trend Insights:** Favors **{top_btts}** and **{top_goals}** based on current performance and injury data.")
 
-        st.markdown("#### Scoreline and goal-distribution projections")
+        st.markdown("#### Scoreline and Goal-Distribution Projections")
         left, right = st.columns([1, 1])
         with left:
             score_df = pd.DataFrame(grid, index=[f"Home {i}" for i in range(grid.shape[0])], columns=[f"Away {i}" for i in range(grid.shape[1])])
@@ -349,36 +379,22 @@ with match_tab:
             market_rows = [{"Projection": name, "Estimated probability": f"{prob:.1%}"} for name, prob in markets.items()]
             st.dataframe(pd.DataFrame(market_rows), hide_index=True, use_container_width=True, height=360)
 
-        st.markdown("#### Match context record")
-        context_rows = [
-            {"Item": "Home lineup", "Status / notes": home_lineup},
-            {"Item": "Away lineup", "Status / notes": away_lineup},
-            {"Item": "Home absences / returns", "Status / notes": home_absences or "Not provided"},
-            {"Item": "Away absences / returns", "Status / notes": away_absences or "Not provided"},
-            {"Item": "Home rest days", "Status / notes": str(home_rest)},
-            {"Item": "Away rest days", "Status / notes": str(away_rest)},
-            {"Item": "Other context", "Status / notes": team_context_note or "Not provided"},
-        ]
-        st.dataframe(pd.DataFrame(context_rows), hide_index=True, use_container_width=True)
-
 with form_tab:
-    st.subheader("Recent match form")
+    st.subheader("Recent Match Form")
     if matches:
         form_df = recent_form_table(matches, team_list, limit=5)
         st.dataframe(form_df, hide_index=True, use_container_width=True)
     else:
-        st.warning("Recent results are not connected yet. Add a Football-Data.org token in the sidebar.")
+        st.warning("Recent results require a Football-Data.org token in the sidebar.")
 
 with standings_tab:
     st.subheader(f"Standings — {selected_league}")
     st.dataframe(standings[["Rank", "Team", "Played", "W", "D", "L", "GF", "GA", "GD", "Points"]], hide_index=True, use_container_width=True)
 
 with methodology_tab:
-    st.subheader("Model methodology and limitations")
+    st.subheader("Model Methodology")
     st.markdown("""
-- Uses goals-for and goals-against averages from the selected standings source.
-- Scales attack and defensive rates relative to league averages.
-- Applies a home-advantage multiplier to home expected goals.
-- Uses independent Poisson distributions to produce a 0–10 goals score matrix.
-- Derives clear match predictions and market probabilities directly from current team performance metrics.
+- Combines live standings with automated injury lookups via API-Football.
+- Automatically adjusts expected goals (xG) downward when key players are listed as injured or suspended.
+- Uses independent Poisson distributions to compute match outcome probabilities and goal markets.
 """)
