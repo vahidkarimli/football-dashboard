@@ -23,20 +23,37 @@ HEADERS = {
 # --- HELPER FUNCTIONS ---
 def get_super_lig_standings():
     url = "https://api.collectapi.com/football/league?league=super-lig"
-    response = requests.get(url, headers=HEADERS)
-    if response.status_code == 200:
+    try:
+        response = requests.get(url, headers=HEADERS)
         data = response.json()
-        if data.get("success"):
+        
+        # Display raw API output for debugging if needed
+        with st.expander("🛠️ API Debug Inspector (Click to view raw API response)"):
+            st.write("Status Code:", response.status_code)
+            st.write("Response Data:", data)
+
+        if isinstance(data, dict) and data.get("success"):
             return data.get("result", [])
+        elif isinstance(data, dict) and "message" in data:
+            st.error(f"CollectAPI Message: {data['message']}")
+        else:
+            st.error("Received invalid response format from CollectAPI.")
+    except Exception as e:
+        st.error(f"Request failed: {str(e)}")
     return []
 
 def get_super_lig_results():
     url = "https://api.collectapi.com/football/results?league=super-lig"
-    response = requests.get(url, headers=HEADERS)
-    if response.status_code == 200:
+    try:
+        response = requests.get(url, headers=HEADERS)
         data = response.json()
-        if data.get("success"):
+        
+        if isinstance(data, dict) and data.get("success"):
             return data.get("result", [])
+        elif isinstance(data, dict) and "message" in data:
+            st.error(f"CollectAPI Message: {data['message']}")
+    except Exception as e:
+        st.error(f"Request failed: {str(e)}")
     return []
 
 # --- MAIN APP LOGIC ---
@@ -50,8 +67,6 @@ with tab1:
             if standings:
                 df_standings = pd.DataFrame(standings)
                 st.dataframe(df_standings, use_container_width=True)
-            else:
-                st.warning("Could not load standings. Please check your API key.")
 
 with tab2:
     st.subheader("Recent Match Results")
@@ -61,5 +76,3 @@ with tab2:
             if results:
                 df_results = pd.DataFrame(results)
                 st.dataframe(df_results, use_container_width=True)
-            else:
-                st.warning("Could not load results. Please check your API key.")
